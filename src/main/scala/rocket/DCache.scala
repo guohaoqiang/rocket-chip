@@ -443,19 +443,24 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
 
   // grant
   val (d_first, d_last, d_done, d_address_inc) = edge.addr_inc(tl_out.d)
-  val grantIsCached = {
-    val res = tl_out.d.bits.opcode.isOneOf(Grant, GrantData)
+  val (d_opc, grantIsUncached, grantIsUncachedData) = {
+    val uncachedGrantOpcodesSansData = Seq(AccessAck, HintAck)
+    val uncachedGrantOpcodesWithData = Seq(AccessAckData)
+    val uncachedGrantOpcodes = uncachedGrantOpcodesWithData ++ uncachedGrantOpcodesSansData
+    val whole_opc = tl_out.d.bits.opcode
     if (usingDataScratchpad) {
-      assert(!(tl_out.d.valid && res))
-      false.B
+      assert(!tl_out.d.valid || whole_opc.isOneOf(uncachedGrantOpcodes))
+      // the only valid TL-D messages are uncached, so we can do some pruning
+      val opc = whole_opc(uncachedGrantOpcodes.map(_.getWidth).max - 1, 0)
+      val data = DecodeLogic(opc, uncachedGrantOpcodesWithData, uncachedGrantOpcodesSansData)
+      (opc, true.B, data)
     } else {
-      res
+      (whole_opc, whole_opc.isOneOf(uncachedGrantOpcodes), whole_opc.isOneOf(uncachedGrantOpcodesWithData))
     }
   }
-  val grantIsUncached = tl_out.d.bits.opcode.isOneOf(AccessAck, AccessAckData, HintAck)
-  val grantIsUncachedData = tl_out.d.bits.opcode === AccessAckData
-  val grantIsVoluntary = tl_out.d.bits.opcode === ReleaseAck // Clears a different pending bit
-  val grantIsRefill = tl_out.d.bits.opcode === GrantData     // Writes the data array
+  val grantIsCached = d_opc.isOneOf(Grant, GrantData)
+  val grantIsVoluntary = d_opc === ReleaseAck // Clears a different pending bit
+  val grantIsRefill = d_opc === GrantData     // Writes the data array
   val grantInProgress = Reg(init=Bool(false))
   val blockProbeAfterGrantCount = Reg(init=UInt(0))
   when (blockProbeAfterGrantCount > 0) { blockProbeAfterGrantCount := blockProbeAfterGrantCount - 1 }
